@@ -2,6 +2,7 @@
 
 from urllib.request import urlopen
 from html.parser import HTMLParser
+from pprint import pprint
 
 url='http://campusravita.fi/index.php?id=2&week=true'
 
@@ -36,7 +37,7 @@ class LunchlistParser(HTMLParser):
         if 'meal_tr' in self.expect:
             if tag == 'tr':
                 self.stack.append('meal_tr')
-                self.expect = ['meal_th']
+                self.expect = ['meal_th', 'food_name_td']
                 return
         if 'meal_th' in self.expect:
             if tag == 'th':
@@ -164,10 +165,10 @@ class LunchlistParser(HTMLParser):
         if 'food_tr_end' in self.expect:
             if tag == 'tr':
                 self.stack.pop()
-                self.expect = ['food_tr', 'day_tr']
+                self.expect = ['food_tr', 'meal_tr', 'day_tr']
 
 
 d = urlopen(url).read().decode()
 l = LunchlistParser()
 l.feed(d)
-print(l.data)
+pprint(l.data)
