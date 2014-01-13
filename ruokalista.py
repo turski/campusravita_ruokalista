@@ -77,7 +77,7 @@ class LunchlistParser(HTMLParser):
         if 'food_price_td_abbr' in self.expect:
             if tag == 'abbr':
                 self.stack.append('food_price_td_abbr')
-                self.expect = ['food_price_td_abbr_data']
+                self.expect = ['food_price_td_abbr_data', 'food_price_td_abbr_end']
                 return
 
     def handle_data(self, data):
