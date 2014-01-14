@@ -16,6 +16,7 @@ class Tag:
         self.typ = typ
         assert not arg or (type(arg) == tuple and len(arg) == 2)
         self.arg = arg
+        assert action == None or callable(action)
         self.action = action
         self.expect = expect
 
@@ -50,17 +51,17 @@ class LunchlistParser(HTMLParser):
                 Tag('food_price', 'abbr', 'start',
                         expect=[Tag('food_price', 'abbr', 'data'), Tag('food_price', 'abbr', 'end')])]
         self.datatags = [
-                Tag('day', 'th', 'data', action='add_day',
+                Tag('day', 'th', 'data', action = self.add_day,
                         expect=[Tag('day', 'th', 'end')]),
-                Tag('meal', 'th', 'data', action='add_meal',
+                Tag('meal', 'th', 'data', action = self.add_meal,
                         expect=[Tag('meal', 'th', 'end')]),
-                Tag('food_name', 'td', 'data', action='add_food',
+                Tag('food_name', 'td', 'data', action = self.add_food,
                         expect=[Tag('food_name', 'td', 'end'), Tag('food_details', 'span', 'start')]),
-                Tag('food_details', 'span', 'data', action='add_food_detail',
+                Tag('food_details', 'span', 'data', action = self.add_food_detail,
                         expect=[Tag('food_details', 'span', 'end')]),
-                Tag('food_flags', 'abbr', 'data', action='add_food_flag',
+                Tag('food_flags', 'abbr', 'data', action = self.add_food_flag,
                         expect=[Tag('food_flags', 'abbr', 'end')]),
-                Tag('food_price', 'abbr', 'data', action='add_food_price',
+                Tag('food_price', 'abbr', 'data', action = self.add_food_price,
                         expect=[Tag('food_price', 'abbr', 'end')])]
         self.endtags = [
                 Tag('lunch', 'thead', 'end',
@@ -90,21 +91,23 @@ class LunchlistParser(HTMLParser):
                 Tag('lunch', 'table', 'end',
                         expect=[])]
 
-    def handle_action(self, action, data):
-        if action == 'add_day':
-            self.data.append({'date': data, 'meals': []})
-        elif action == 'add_meal':
-            self.data[-1]['meals'].append({'meal': data, 'foods': []})
-        elif action == 'add_food':
-            self.data[-1]['meals'][-1]['foods'].append({'name': data, 'details': [], 'flags': [], 'price': None})
-        elif action == 'add_food_detail':
-            self.data[-1]['meals'][-1]['foods'][-1]['details'].append(data)
-        elif action == 'add_food_flag':
-            self.data[-1]['meals'][-1]['foods'][-1]['flags'].append(data)
-        elif action == 'add_food_price':
-            self.data[-1]['meals'][-1]['foods'][-1]['price'] = data
-        else:
-            raise ArgumentError('invalid action: {}'.format(action))
+    def add_day(self, data):
+        self.data.append({'date': data, 'meals': []})
+
+    def add_meal(self, data):
+        self.data[-1]['meals'].append({'meal': data, 'foods': []})
+
+    def add_food(self, data):
+        self.data[-1]['meals'][-1]['foods'].append({'name': data, 'details': [], 'flags': [], 'price': None})
+    
+    def add_food_detail(self, data):
+        self.data[-1]['meals'][-1]['foods'][-1]['details'].append(data)
+    
+    def add_food_flag(self, data):
+        self.data[-1]['meals'][-1]['foods'][-1]['flags'].append(data)
+
+    def add_food_price(self, data):
+        self.data[-1]['meals'][-1]['foods'][-1]['price'] = data
 
     def handle_starttag(self, tag, args):
         for e in self.expect:
@@ -122,7 +125,8 @@ class LunchlistParser(HTMLParser):
                 for t in self.datatags:
                     if t.name == e.name:
                         self.expect = t.expect
-                        self.handle_action(t.action, data)
+                        if t.action:
+                            t.action(data)
                         return
 
     def handle_endtag(self, tag):
@@ -136,10 +140,10 @@ class LunchlistParser(HTMLParser):
                         return
 
 
-t = time()
-d = urlopen(url).read().decode()
 l = LunchlistParser()
-l.feed(d)
+r = urlopen(url)
+t = time()
+l.feed(r.read().decode())
 t = time() - t
 pprint(l.data)
-print("Fetching and parsing took {} seconds".format(t))
+print(t)
