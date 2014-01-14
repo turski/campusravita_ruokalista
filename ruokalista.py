@@ -3,172 +3,143 @@
 from urllib.request import urlopen
 from html.parser import HTMLParser
 from pprint import pprint
+from time import time
 
 url='http://campusravita.fi/index.php?id=2&week=true'
+
+class Tag:
+    def __init__(self, name, tag, typ, arg=None, action=None, expect=None):
+        self.name = name
+        assert tag in ['table', 'thead', 'tr', 'th', 'td', 'abbr', 'span']
+        self.tag = tag
+        assert typ in ['start', 'data', 'end']
+        self.typ = typ
+        assert not arg or (type(arg) == tuple and len(arg) == 2)
+        self.arg = arg
+        self.action = action
+        self.expect = expect
 
 class LunchlistParser(HTMLParser):
     def __init__(self):
         super().__init__(self)
         self.data = []
-        self.stack = []
-        self.expect = ['lunch_table']
+        self.expect = [Tag('lunch', 'table', 'start', arg=('class', 'lunchlist'))]
+        self.starttags = [
+                Tag('lunch', 'table', 'start', arg=('class', 'lunchlist'),
+                        expect=[Tag('lunch', 'thead', 'start')]),
+                Tag('lunch', 'thead', 'start',
+                        expect=[Tag('lunch', 'thead', 'end')]),
+                Tag('day', 'tr', 'start', arg=('class', 'day_tr'),
+                        expect=[Tag('day', 'th', 'start')]),
+                Tag('day', 'th', 'start', arg=('class', 'day'),
+                        expect=[Tag('day', 'th', 'data')]),
+                Tag('meal_or_food', 'tr', 'start',
+                        expect=[Tag('meal', 'th', 'start'), Tag('food_name', 'td', 'start')]),
+                Tag('meal', 'th', 'start',
+                        expect=[Tag('meal', 'th', 'data'), Tag('meal', 'th', 'end')]),
+                Tag('food_name', 'td', 'start',
+                        expect=[Tag('food_name', 'td', 'data')]),
+                Tag('food_details', 'span', 'start', arg=('class', 'details'),
+                        expect=[Tag('food_details', 'span', 'data')]),
+                Tag('food_flags', 'td', 'start',
+                        expect=[Tag('food_flags', 'abbr', 'start'), Tag('food_flags', 'td', 'end')]),
+                Tag('food_flags', 'abbr', 'start',
+                        expect=[Tag('food_flags', 'abbr', 'data')]),
+                Tag('food_price', 'td', 'start',
+                        expect=[Tag('food_price', 'abbr', 'start'), Tag('food_price', 'td', 'end')]),
+                Tag('food_price', 'abbr', 'start',
+                        expect=[Tag('food_price', 'abbr', 'data'), Tag('food_price', 'abbr', 'end')])]
+        self.datatags = [
+                Tag('day', 'th', 'data', action='add_day',
+                        expect=[Tag('day', 'th', 'end')]),
+                Tag('meal', 'th', 'data', action='add_meal',
+                        expect=[Tag('meal', 'th', 'end')]),
+                Tag('food_name', 'td', 'data', action='add_food',
+                        expect=[Tag('food_name', 'td', 'end'), Tag('food_details', 'span', 'start')]),
+                Tag('food_details', 'span', 'data', action='add_food_detail',
+                        expect=[Tag('food_details', 'span', 'end')]),
+                Tag('food_flags', 'abbr', 'data', action='add_food_flag',
+                        expect=[Tag('food_flags', 'abbr', 'end')]),
+                Tag('food_price', 'abbr', 'data', action='add_food_price',
+                        expect=[Tag('food_price', 'abbr', 'end')])]
+        self.endtags = [
+                Tag('lunch', 'thead', 'end',
+                        expect=[Tag('day', 'tr', 'start')]),
+                Tag('day', 'th', 'end',
+                        expect=[Tag('day', 'tr', 'end')]),
+                Tag('day', 'tr', 'end',
+                        expect=[Tag('meal_or_food', 'tr', 'start')]),
+                Tag('meal', 'th', 'end',
+                        expect=[Tag('meal', 'tr', 'end')]),
+                Tag('meal', 'tr', 'end',
+                        expect=[Tag('meal_or_food', 'tr', 'start'), Tag('lunch', 'table', 'end')]),
+                Tag('food_details', 'span', 'end',
+                        expect=[Tag('food_name', 'td', 'end'), Tag('food_details', 'span', 'start')]),
+                Tag('food_name', 'td', 'end',
+                        expect=[Tag('food_flags', 'td', 'start')]),
+                Tag('food_flags', 'abbr', 'end',
+                        expect=[Tag('food_flags', 'abbr', 'start'), Tag('food_flags', 'td', 'end')]),
+                Tag('food_flags', 'td', 'end',
+                        expect=[Tag('food_price', 'td', 'start')]),
+                Tag('food_price', 'abbr', 'end',
+                        expect=[Tag('food_price', 'td', 'end')]),
+                Tag('food_price', 'td', 'end',
+                        expect=[Tag('food', 'tr', 'end')]),
+                Tag('food', 'tr', 'end',
+                        expect=[Tag('day', 'tr', 'start'), Tag('meal_or_food', 'tr', 'start'), Tag('lunch', 'table', 'end')]),
+                Tag('lunch', 'table', 'end',
+                        expect=[])]
+
+    def handle_action(self, action, data):
+        if action == 'add_day':
+            self.data.append({'date': data, 'meals': []})
+        elif action == 'add_meal':
+            self.data[-1]['meals'].append({'meal': data, 'foods': []})
+        elif action == 'add_food':
+            self.data[-1]['meals'][-1]['foods'].append({'name': data, 'details': [], 'flags': [], 'price': None})
+        elif action == 'add_food_detail':
+            self.data[-1]['meals'][-1]['foods'][-1]['details'].append(data)
+        elif action == 'add_food_flag':
+            self.data[-1]['meals'][-1]['foods'][-1]['flags'].append(data)
+        elif action == 'add_food_price':
+            self.data[-1]['meals'][-1]['foods'][-1]['price'] = data
+        else:
+            raise ArgumentError('invalid action: {}'.format(action))
 
     def handle_starttag(self, tag, args):
-        if 'lunch_table' in self.expect:
-            if tag == 'table' and ('class', 'lunchlist') in args:
-                self.stack.append('lunch_table')
-                self.expect = ['lunch_thead']
-                return
-        if 'lunch_thead' in self.expect:
-            if tag == 'thead':
-                self.stack.append('lunch_thead')
-                self.expect = ['lunch_thead_end']
-                return
-        if 'day_tr' in self.expect:
-            if tag == 'tr' and ('class', 'day_tr') in args:
-                self.stack.append('day_tr')
-                self.expect = ['day_th']
-                return
-        if 'day_th' in self.expect:
-            if tag == 'th' and ('class', 'day') in args:
-                self.stack.append('day_th')
-                self.expect = ['day_th_data']
-                return
-        if 'meal_tr' in self.expect:
-            if tag == 'tr':
-                self.stack.append('meal_tr')
-                self.expect = ['meal_th', 'food_name_td']
-                return
-        if 'meal_th' in self.expect:
-            if tag == 'th':
-                self.stack.append('meal_th')
-                self.expect = ['meal_th_data']
-                return
-        if 'food_tr' in self.expect:
-            if tag == 'tr':
-                self.stack.append('food_tr')
-                self.expect = ['food_name_td']
-                return
-        if 'food_name_td' in self.expect:
-            if tag == 'td':
-                self.stack.append('food_name_td')
-                self.expect = ['food_name_td_data']
-                return
-        if 'food_name_td_details_span' in self.expect:
-            if tag == 'span' and ('class', 'details') in args:
-                self.stack.append('food_name_td_details_span')
-                self.expect = ['food_name_td_details_span_data']
-                return
-        if 'food_flags_td' in self.expect:
-            if tag == 'td':
-                self.stack.append('food_flags_td')
-                self.expect = ['food_flags_td_abbr', 'food_flags_td_end']
-                return
-        if 'food_flags_td_abbr' in self.expect:
-            if tag == 'abbr':
-                self.stack.append('food_flags_td_abbr')
-                self.expect = ['food_flags_td_abbr_data']
-                return
-        if 'food_price_td' in self.expect:
-            if tag == 'td' and ('class', 'print_menu_price') in args:
-                self.stack.append('food_price_td')
-                self.expect = ['food_price_td_abbr']
-                return
-        if 'food_price_td_abbr' in self.expect:
-            if tag == 'abbr':
-                self.stack.append('food_price_td_abbr')
-                self.expect = ['food_price_td_abbr_data', 'food_price_td_abbr_end']
-                return
+        for e in self.expect:
+            if e.tag == tag and e.typ == 'start':
+                for t in self.starttags:
+                    if t.name == e.name and t.tag == e.tag:
+                        if t.arg != None and t.arg not in args:
+                            continue
+                        self.expect = t.expect
+                        return
 
     def handle_data(self, data):
-        if 'day_th_data' in self.expect:
-            self.data.append({'date': data, 'meals': []})
-            self.expect = ['day_th_end']
-            return
-        if 'meal_th_data' in self.expect:
-            self.data[-1]['meals'].append({'meal': data, 'foods': []})
-            self.expect = ['meal_th_end']
-            return
-        if 'food_name_td_data' in self.expect:
-            self.data[-1]['meals'][-1]['foods'].append({'name': data, 'details': [], 'flags': [], 'price': None})
-            self.expect = ['food_name_td_end', 'food_name_td_details_span']
-            return
-        if 'food_name_td_details_span_data' in self.expect:
-            self.data[-1]['meals'][-1]['foods'][-1]['details'].append(data)
-            self.expect = ['food_name_td_details_span_end']
-            return
-        if 'food_flags_td_abbr_data' in self.expect:
-            self.data[-1]['meals'][-1]['foods'][-1]['flags'].append(data)
-            self.expect = ['food_flags_td_abbr_end']
-            return
-        if 'food_price_td_abbr_data' in self.expect:
-            self.data[-1]['meals'][-1]['foods'][-1]['price'] = data
-            self.expect = ['food_price_td_abbr_end']
-            return
+        for e in self.expect:
+            if e.typ == 'data':
+                for t in self.datatags:
+                    if t.name == e.name:
+                        self.expect = t.expect
+                        self.handle_action(t.action, data)
+                        return
 
     def handle_endtag(self, tag):
-        if 'lunch_thead_end' in self.expect:
-            if tag == 'thead':
-                self.stack.pop()
-                self.expect = ['day_tr']
-                return
-        if 'day_th_end' in self.expect:
-            if tag == 'th':
-                self.stack.pop()
-                self.expect = ['day_tr_end']
-                return
-        if 'day_tr_end' in self.expect:
-            if tag == 'tr':
-                self.stack.pop()
-                self.expect = ['meal_tr']
-                return
-        if 'meal_th_end' in self.expect:
-            if tag == 'th':
-                self.stack.pop()
-                self.expect = ['meal_tr_end']
-                return
-        if 'meal_tr_end' in self.expect:
-            if tag == 'tr':
-                self.stack.pop()
-                self.expect = ['food_tr']
-                return
-        if 'food_name_td_details_span_end' in self.expect:
-            if tag == 'span':
-                self.stack.pop()
-                self.expect = ['food_name_td_end', 'food_name_td_details_span']
-                return
-        if 'food_name_td_end' in self.expect:
-            if tag == 'td':
-                self.stack.pop()
-                self.expect = ['food_flags_td']
-                return
-        if 'food_flags_td_abbr_end' in self.expect:
-            if tag == 'abbr':
-                self.stack.pop()
-                self.expect = ['food_flags_td_abbr', 'food_flags_td_end']
-                return
-        if 'food_flags_td_end' in self.expect:
-            if tag == 'td':
-                self.stack.pop()
-                self.expect = ['food_price_td']
-                return
-        if 'food_price_td_abbr_end' in self.expect:
-            if tag == 'abbr':
-                self.stack.pop()
-                self.expect = ['food_price_td_end']
-                return
-        if 'food_price_td_end' in self.expect:
-            if tag == 'td':
-                self.stack.pop()
-                self.expect = ['food_tr_end']
-                return
-        if 'food_tr_end' in self.expect:
-            if tag == 'tr':
-                self.stack.pop()
-                self.expect = ['food_tr', 'meal_tr', 'day_tr']
+        for e in self.expect:
+            if e.tag == tag and e.typ == 'end':
+                for t in self.endtags:
+                    if t.name == e.name and t.tag == e.tag and t.typ == e.typ:
+                        if t.arg != None and t.arg not in args:
+                            continue
+                        self.expect = t.expect
+                        return
 
 
+t = time()
 d = urlopen(url).read().decode()
 l = LunchlistParser()
 l.feed(d)
+t = time() - t
 pprint(l.data)
+print("Fetching and parsing took {} seconds".format(t))
